@@ -6,7 +6,7 @@ from qdrant_client import QdrantClient, models
 
 load_dotenv()
 
-COLLECTION = "tickets_test"  # Nom de la collection Qdrant a utiliser
+COLLECTION = "tickets"  # Nom de la collection Qdrant a utiliser
 DENSE_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 SPARSE_MODEL = "Qdrant/bm25"
 
