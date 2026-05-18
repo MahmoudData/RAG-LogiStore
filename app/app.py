@@ -1,7 +1,12 @@
 """Frontend Streamlit - Recherche de tickets support (RAG)."""
 
+import os
 import streamlit as st
+from openai import OpenAI
+from dotenv import load_dotenv
 from rag_engine import search, get_filter_options
+
+load_dotenv()
 
 
 def score_circle(score, max_score=None, size=50):
@@ -27,6 +32,52 @@ def score_circle(score, max_score=None, size=50):
     </div>
     """
 
+
+def synthesize(query, results, model="google/gemini-2.0-flash-001"):
+    """Synthetise une reponse a partir des resultats les mieux classes."""
+    api_key = os.getenv("OPENROUTER_API_KEY")
+    if not api_key:
+        return "OPENROUTER_API_KEY manquante."
+
+    client = OpenAI(
+        api_key=api_key,
+        base_url="https://openrouter.ai/api/v1",
+        default_headers={"HTTP-Referer": "http://localhost", "X-Title": "logistore"},
+    )
+
+    # Construction du contexte a partir des top resultats
+    context_parts = []
+    for i, r in enumerate(results, 1):
+        context_parts.append(
+            f"--- Ticket {i} ---\n"
+            f"Sujet: {r['subject']}\n"
+            f"Type: {r['type']} | Queue: {r['queue']} | Priority: {r['priority']}\n"
+            f"Contenu: {r['body'][:500]}\n"
+            f"Reponse: {r['answer'][:500]}"
+        )
+    context = "\n\n".join(context_parts)
+
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "Simply summarize the results of the support ticket search below. "
+                    "Do not conduct any external searches. Do not make any assumptions. "
+                    "Base your response solely on the information provided."
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"Question : {query}\n\nTickets retrouves :\n{context}",
+            },
+        ],
+        max_tokens=600,
+    )
+    return response.choices[0].message.content
+
+
 # --- Config page ---
 st.set_page_config(page_title="LogiStore - Recherche Tickets", layout="wide")
 st.title("LogiStore - Recherche Tickets Support")
@@ -42,14 +93,15 @@ filters = load_filters()
 with st.sidebar:
     st.header("Filtres")
 
-    method = st.selectbox("Methode de recherche", ["hybrid", "dense", "sparse"])
+    method = st.selectbox("Methode de recherche", ["hybrid_rerank", "hybrid", "dense", "sparse"])
 
     type_filter = st.selectbox("Type", [""] + filters["types"])
     queue_filter = st.selectbox("Queue", [""] + filters["queues"])
     priority_filter = st.selectbox("Priority", [""] + filters["priorities"])
     tag_filter = st.selectbox("Tag", [""] + filters["tags"])
 
-    limit = st.slider("Nombre de resultats", min_value=3, max_value=20, value=10)
+    limit = st.slider("Nombre de resultats", min_value=3, max_value=20, value=7)
+
 
 # --- Barre de recherche ---
 query = st.text_input("Rechercher un ticket", placeholder="Ex: printer not connecting, billing issue, security breach...")
@@ -66,6 +118,13 @@ if query:
             priority=priority_filter or None,
             tag=tag_filter or None,
         )
+
+    # --- Bouton synthese IA (sous la barre de recherche, avant les resultats) ---
+    if results:
+        if st.button("Generer une synthese IA"):
+            with st.spinner("Synthese en cours..."):
+                answer = synthesize(query, results[:3])
+            st.info(answer)
 
     max_score = results[0]["score"] if results else 1.0
 
